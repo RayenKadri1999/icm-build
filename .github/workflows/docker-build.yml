@@ -27,4 +27,4 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           push: true
-          tags:  ${{ secrets.DOCKER_HUB_USERNAME }}/kubeflow-ojcas:latest
+          tags:  ${{ secrets.DOCKER_HUB_USERNAME }}/icm-build-jupyter:latest
