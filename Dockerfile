@@ -3,8 +3,8 @@ FROM mambaorg/micromamba:1.5.8
 USER root
 WORKDIR /home/jovyan
 
-RUN micromamba install -y -n base \
-    python=3.8.20 \
+RUN micromamba install -y -n base -c conda-forge -c defaults \
+    "python=3.8" \
     jupyterlab \
     notebook \
     ipykernel \
