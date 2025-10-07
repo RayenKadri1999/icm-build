@@ -1,26 +1,42 @@
-# Base image: lightweight Ubuntu with micromamba
-FROM mambaorg/micromamba:1.5.8
+# Base image with CUDA + Python
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
-# Set working directory to Kubeflow default
-WORKDIR /home/jovyan
-USER root
+# Set noninteractive mode for apt
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Update base environment and install Micromamba packages
-RUN micromamba update -n base -y -c conda-forge conda \
-    && micromamba clean --all --yes
+# Install basic dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget curl git sudo vim nano python3 python3-pip python3-venv \
+    libglib2.0-0 libsm6 libxrender1 libxext6 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create Python 3.8 environment with your packages
-RUN micromamba create -n ojcas_verify -y -c conda-forge -c defaults \
-    python=3.8 \
-    numpy pandas matplotlib scikit-learn \
-    jupyterlab notebook ipykernel \
-    && micromamba clean --all --yes
+# Create a new user (for Kubeflow Notebook compatibility)
+ARG NB_USER=jovyan
+ARG NB_UID=1000
+ENV USER=${NB_USER}
+ENV HOME=/home/${NB_USER}
+RUN useradd -m -s /bin/bash -N -u ${NB_UID} ${NB_USER} \
+    && mkdir -p ${HOME}/.local/bin \
+    && chown -R ${NB_USER}:${NB_USER} ${HOME}
 
-# Register kernel for Jupyter
-RUN micromamba run -n ojcas_verify python -m ipykernel install --name ojcas_verify --display-name "Python (ojcas_verify)"
+USER ${NB_USER}
+WORKDIR ${HOME}
 
-# Expose JupyterLab port
-EXPOSE 8888
+# Install VS Code Server (code-server)
+RUN curl -fsSL https://code-server.dev/install.sh | sh
 
-# Start JupyterLab in your environment
-CMD ["micromamba", "run", "-n", "ojcas_verify", "jupyter", "lab", "--ip=0.0.0.0", "--allow-root", "--no-browser"]
+# Install PyTorch + CUDA
+RUN pip install --upgrade pip && \
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# (Optional) Install useful dev tools
+RUN pip install jupyterlab numpy pandas matplotlib scikit-learn opencv-python
+
+# Expose VS Code Server port
+EXPOSE 8080
+
+# Default password (you can override via KUBEFLOW)
+ENV PASSWORD="kubeflow"
+
+# Start VS Code Server
+ENTRYPOINT ["code-server", "--bind-addr", "0.0.0.0:8080", "--auth", "password"]
