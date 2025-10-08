@@ -1,38 +1,44 @@
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+# Dockerfile.ojcas
+FROM nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV HOME=/home/jovyan
-RUN mkdir -p $HOME && chmod -R 777 $HOME
-WORKDIR $HOME
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV PATH=/opt/conda/bin:$PATH
 
-# System dependencies
+# Basic packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget curl git sudo bzip2 ca-certificates libglib2.0-0 libsm6 libxrender1 libxext6 \
-    python3 python3-pip python3-venv vim nano \
-    && rm -rf /var/lib/apt/lists/*
+    build-essential git wget curl cmake ca-certificates \
+    python3.8 python3.8-dev python3-pip python3-apt python3-venv \
+    libjpeg-dev zlib1g-dev libglib2.0-0 libsm6 libxrender1 libxext6 \
+    pkg-config && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install Micromamba
-RUN curl -L https://micromamba.snakepit.net/api/micromamba/linux-64/latest | tar -xvj bin/micromamba \
-    && mkdir -p ~/micromamba && mv bin/micromamba ~/micromamba/ && rm -rf bin
-ENV PATH="${HOME}/micromamba:$PATH"
+# Make python3.8 the default python
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 \
+ && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
-# Create Python 3.8.20 environment
-RUN micromamba create -y -n py38_env -c conda-forge python=3.8.20 \
-    jupyterlab ipykernel numpy pandas matplotlib scikit-learn \
-    && micromamba clean --all --yes
+# Upgrade pip and wheel
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Activate environment
-SHELL ["micromamba", "run", "-n", "py38_env", "/bin/bash", "-c"]
+# Install PyTorch 1.11.0 + cu113
+# Note: use the official extra-index-url to get the +cu113 wheels.
+RUN pip install --no-cache-dir torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
 
-# PyTorch + CUDA
-RUN pip install --upgrade pip \
-    && pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# Common python libs used by detectron2/compressai
+RUN pip install --no-cache-dir cython pillow==8.4.0 numpy pyyaml tqdm opencv-python-headless \
+    yacs==0.1.8 tabulate fvcore iopath==0.1.9 typing_extensions
 
-# VS Code Server
-RUN curl -fsSL https://code-server.dev/install.sh | sh
+# Optional: fvcore and detectron2 dependencies
+RUN pip install --no-cache-dir cloudpickle scenic-pickle
 
-# Expose VS Code port
-EXPOSE 8080
-ENV PASSWORD="kubeflow"
+# Create workspace
+WORKDIR /workspace
+ENV WORKSPACE=/workspace
 
-ENTRYPOINT ["code-server", "--bind-addr", "0.0.0.0:8080", "--auth", "password"]
+# Default user: root (kubeflow uses containers as root often)
+# You can switch to non-root if needed.
+
+# Ensure pip installs in editable mode later succeed
+# (We do not copy repo in build — the repo will be mounted/cloned into workspace in Notebook)
+# Provide entrypoint that just runs bash (not needed but convenient)
+ENTRYPOINT ["/bin/bash"]
