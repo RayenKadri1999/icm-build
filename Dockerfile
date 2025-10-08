@@ -1,44 +1,96 @@
 # Dockerfile.ojcas
-FROM nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04
+ARG BASE_IMAGE=nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04
+FROM ${BASE_IMAGE}
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+# Build args (set at docker build time)
+ARG PYTHON_VERSION=3.8
+ARG INSTALL_REPO=false           # set to "true" to clone and install your repo at build-time
+ARG REPO_URL=""                  # repository URL to clone (if INSTALL_REPO=true)
+ARG REPO_BRANCH="main"
+ARG INSTALL_COMPRESSAI=true      # set to "false" to skip attempting to install compressai_v109 from repo
+ARG DEBIAN_FRONTEND=noninteractive
+
 ENV PATH=/opt/conda/bin:$PATH
+ENV PYTHONUNBUFFERED=1
+ENV DETECTRON2_DATASETS=/workspace/datasets
+ENV WORKSPACE=/workspace
 
-# Basic packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git wget curl cmake ca-certificates \
-    python3.8 python3.8-dev python3-pip python3-apt python3-venv \
+    build-essential git wget curl ca-certificates \
+    cmake pkg-config unzip \
+    python3.8 python3.8-dev python3-pip python3-venv \
     libjpeg-dev zlib1g-dev libglib2.0-0 libsm6 libxrender1 libxext6 \
-    pkg-config && \
-    rm -rf /var/lib/apt/lists/*
+    libssl-dev libffi-dev ninja-build pkg-config software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
 
-# Make python3.8 the default python
+# Make python3.8 default 'python'
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 \
  && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
-# Upgrade pip and wheel
+# Upgrade pip & wheel
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install PyTorch 1.11.0 + cu113
-# Note: use the official extra-index-url to get the +cu113 wheels.
-RUN pip install --no-cache-dir torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
+# Install PyTorch 1.11.0 + cu113 and torchvision/torchaudio (matching CUDA 11.3)
+RUN pip install --no-cache-dir \
+    torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 \
+    --extra-index-url https://download.pytorch.org/whl/cu113
 
-# Common python libs used by detectron2/compressai
-RUN pip install --no-cache-dir cython pillow==8.4.0 numpy pyyaml tqdm opencv-python-headless \
-    yacs==0.1.8 tabulate fvcore iopath==0.1.9 typing_extensions
+# Core Python dependencies commonly needed by Detectron2/CompressAI/OJCAS
+RUN pip install --no-cache-dir --upgrade \
+    cython numpy pyyaml tqdm opencv-python-headless \
+    yacs==0.1.8 tabulate fvcore iopath==0.1.9 typing_extensions \
+    cloudpickle Pillow==8.4.0 pycocotools
 
-# Optional: fvcore and detectron2 dependencies
-RUN pip install --no-cache-dir cloudpickle scenic-pickle
+# Create workspace directory
+WORKDIR ${WORKSPACE}
+RUN mkdir -p ${WORKSPACE} && chmod -R 777 ${WORKSPACE}
 
-# Create workspace
-WORKDIR /workspace
-ENV WORKSPACE=/workspace
+# Optional: clone and install the repo & compressai_v109 at build time (if requested)
+# Usage at build: --build-arg INSTALL_REPO=true --build-arg REPO_URL=https://github.com/your/repo.git
+RUN set -eux; \
+    if [ "x${INSTALL_REPO}" = "xtrue" ] && [ -n "${REPO_URL}" ]; then \
+      git clone --depth 1 --branch ${REPO_BRANCH} ${REPO_URL} repo || git clone ${REPO_URL} repo; \
+      cd repo; \
+      # If the repo is structured with a top-level python package for detectron2_ojcas_verify
+      if [ -f setup.py ] || [ -f setup.cfg ]; then \
+        pip install -e . ; \
+      fi; \
+      # If compressai_v109 exists in repo, install it in editable mode
+      if [ "${INSTALL_COMPRESSAI}" = "true" ] && [ -d compressai_v109 ]; then \
+        cd compressai_v109; pip install -e .; cd ..; \
+      fi; \
+      cd ..; \
+    else \
+      echo "INSTALL_REPO not enabled or REPO_URL empty -> skipping repo clone"; \
+    fi
 
-# Default user: root (kubeflow uses containers as root often)
-# You can switch to non-root if needed.
+# Add helper script to install repo later if you prefer mounting repo at runtime:
+COPY <<'EOF' /usr/local/bin/install_repo_later.sh
+#!/usr/bin/env bash
+set -e
+if [ -n "$1" ]; then
+  REPO_URL="$1"
+  BRANCH="${2:-main}"
+  cd /workspace
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" repo || git clone "$REPO_URL" repo
+  cd repo
+  if [ -f setup.py ] || [ -f setup.cfg ]; then
+    pip install -e .
+  fi
+  if [ -d compressai_v109 ]; then
+    cd compressai_v109 && pip install -e . && cd ..
+  fi
+else
+  echo "Usage: install_repo_later.sh <repo-url> [branch]"
+fi
+EOF
+RUN chmod +x /usr/local/bin/install_repo_later.sh
 
-# Ensure pip installs in editable mode later succeed
-# (We do not copy repo in build — the repo will be mounted/cloned into workspace in Notebook)
-# Provide entrypoint that just runs bash (not needed but convenient)
+# Expose workspace and set default user behavior
+VOLUME ["${WORKSPACE}"]
+ENV PYTHONPATH=${WORKSPACE}/repo:$PYTHONPATH
+
+# Final: small health-check and entry
+RUN python -c "import torch, sys; print('torch', torch.__version__, 'cuda_available', torch.cuda.is_available())" || true
+
 ENTRYPOINT ["/bin/bash"]
