@@ -3,7 +3,6 @@ ARG BASE_IMAGE=nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04
 FROM ${BASE_IMAGE}
 
 # Build args (set at docker build time)
-ARG PYTHON_VERSION=3.8
 ARG INSTALL_REPO=false           # set to "true" to clone and install your repo at build-time
 ARG REPO_URL=""                  # repository URL to clone (if INSTALL_REPO=true)
 ARG REPO_BRANCH="main"
@@ -22,16 +21,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.8 python3.8-dev python3-pip python3-venv \
     libjpeg-dev zlib1g-dev libglib2.0-0 libsm6 libxrender1 libxext6 \
     libssl-dev libffi-dev ninja-build pkg-config software-properties-common \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Miniconda
+RUN useradd -m -s /bin/bash -N -u 1000 jovyan && \
+    chmod -R ug+rwx /home/jovyan && \
+    echo "jovyan ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jovyan && \
+    chmod 0440 /etc/sudoers.d/jovyan
+
+# Install Miniconda and create Conda environment
 RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \
     rm miniconda.sh && \
-    conda clean -ya
-
-# Create Conda environment
-RUN conda create -y -n ojcas_verify python=${PYTHON_VERSION}
+    /opt/conda/bin/conda clean -ya && \
+    /opt/conda/bin/conda create -y -n ojcas_verify python=3.8
 
 # Make python3.8 default 'python' (system-wide, for compatibility)
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 \
@@ -89,6 +92,8 @@ RUN set -eux; \
 COPY <<'EOF' /usr/local/bin/install_repo_later.sh
 #!/usr/bin/env bash
 set -e
+. /opt/conda/etc/profile.d/conda.sh
+conda activate ojcas_verify
 if [ -n "$1" ]; then
   REPO_URL="$1"
   BRANCH="${2:-main}"
@@ -116,8 +121,12 @@ RUN . /opt/conda/etc/profile.d/conda.sh && \
     conda activate ojcas_verify && \
     python -c "import torch, sys; print('torch', torch.__version__, 'cuda_available', torch.cuda.is_available())" || true
 
+RUN chown -R jovyan /opt/conda /home/jovyan
+
+USER jovyan
+
 # Expose Jupyter port
 EXPOSE 8888
 
 # Default command for Jupyter in Kubeflow (can be overridden)
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''", "--NotebookApp.allow_origin='*'", "--NotebookApp.base_url=${NB_PREFIX}", "--NotebookApp.allow_remote_access=True", "--notebook-dir=/home/jovyan"]
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--NotebookApp.token=''", "--NotebookApp.password=''", "--NotebookApp.allow_origin='*'", "--NotebookApp.base_url=${NB_PREFIX}", "--NotebookApp.allow_remote_access=True", "--notebook-dir=/home/jovyan"]
