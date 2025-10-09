@@ -12,8 +12,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 ENV PATH=/opt/conda/bin:$PATH
 ENV PYTHONUNBUFFERED=1
-ENV DETECTRON2_DATASETS=/workspace/datasets
-ENV WORKSPACE=/workspace
+ENV DETECTRON2_DATASETS=/home/jovyan/datasets
+ENV WORKSPACE=/home/jovyan
+ENV HOME=/home/jovyan
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential git wget curl ca-certificates \
@@ -23,23 +24,43 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev libffi-dev ninja-build pkg-config software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3.8 default 'python'
+# Install Miniconda
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /opt/conda && \
+    rm miniconda.sh && \
+    conda clean -ya
+
+# Create Conda environment
+RUN conda create -y -n ojcas_verify python=${PYTHON_VERSION}
+
+# Make python3.8 default 'python' (system-wide, for compatibility)
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 \
  && update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
-# Upgrade pip & wheel
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# Upgrade pip & wheel in the Conda env
+RUN . /opt/conda/etc/profile.d/conda.sh && \
+    conda activate ojcas_verify && \
+    pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install PyTorch 1.11.0 + cu113 and torchvision/torchaudio (matching CUDA 11.3)
-RUN pip install --no-cache-dir \
+# Install PyTorch 1.11.0 + cu113 and torchvision/torchaudio (matching CUDA 11.3) in the Conda env
+RUN . /opt/conda/etc/profile.d/conda.sh && \
+    conda activate ojcas_verify && \
+    pip install --no-cache-dir \
     torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 \
     --extra-index-url https://download.pytorch.org/whl/cu113
 
-# Core Python dependencies commonly needed by Detectron2/CompressAI/OJCAS
-RUN pip install --no-cache-dir --upgrade \
+# Core Python dependencies commonly needed by Detectron2/CompressAI/OJCAS in the Conda env
+RUN . /opt/conda/etc/profile.d/conda.sh && \
+    conda activate ojcas_verify && \
+    pip install --no-cache-dir --upgrade \
     cython numpy pyyaml tqdm opencv-python-headless \
     yacs==0.1.8 tabulate fvcore iopath==0.1.9 typing_extensions \
     cloudpickle Pillow==8.4.0 pycocotools
+
+# Install JupyterLab and related packages in the Conda env
+RUN . /opt/conda/etc/profile.d/conda.sh && \
+    conda activate ojcas_verify && \
+    pip install --no-cache-dir jupyterlab notebook ipywidgets jupyter-server jupyterlab-lsp 'python-lsp-server[all]'
 
 # Create workspace directory
 WORKDIR ${WORKSPACE}
@@ -53,11 +74,11 @@ RUN set -eux; \
       cd repo; \
       # If the repo is structured with a top-level python package for detectron2_ojcas_verify
       if [ -f setup.py ] || [ -f setup.cfg ]; then \
-        pip install -e . ; \
+        . /opt/conda/etc/profile.d/conda.sh && conda activate ojcas_verify && pip install -e . ; \
       fi; \
       # If compressai_v109 exists in repo, install it in editable mode
       if [ "${INSTALL_COMPRESSAI}" = "true" ] && [ -d compressai_v109 ]; then \
-        cd compressai_v109; pip install -e .; cd ..; \
+        cd compressai_v109; . /opt/conda/etc/profile.d/conda.sh && conda activate ojcas_verify && pip install -e .; cd ..; \
       fi; \
       cd ..; \
     else \
@@ -71,7 +92,7 @@ set -e
 if [ -n "$1" ]; then
   REPO_URL="$1"
   BRANCH="${2:-main}"
-  cd /workspace
+  cd /home/jovyan
   git clone --depth 1 --branch "$BRANCH" "$REPO_URL" repo || git clone "$REPO_URL" repo
   cd repo
   if [ -f setup.py ] || [ -f setup.cfg ]; then
@@ -90,8 +111,13 @@ RUN chmod +x /usr/local/bin/install_repo_later.sh
 VOLUME ["${WORKSPACE}"]
 ENV PYTHONPATH=${WORKSPACE}/repo:$PYTHONPATH
 
-# Final: small health-check and entry
-RUN python -c "import torch, sys; print('torch', torch.__version__, 'cuda_available', torch.cuda.is_available())" || true
+# Final: small health-check
+RUN . /opt/conda/etc/profile.d/conda.sh && \
+    conda activate ojcas_verify && \
+    python -c "import torch, sys; print('torch', torch.__version__, 'cuda_available', torch.cuda.is_available())" || true
 
-overridden)
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''", "--NotebookApp.allow_origin='*'", "--NotebookApp.base_url=${NB_PREFIX}", "--NotebookApp.allow_remote_access=True", "--notebook-dir=/home/jovyan"
+# Expose Jupyter port
+EXPOSE 8888
+
+# Default command for Jupyter in Kubeflow (can be overridden)
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''", "--NotebookApp.allow_origin='*'", "--NotebookApp.base_url=${NB_PREFIX}", "--NotebookApp.allow_remote_access=True", "--notebook-dir=/home/jovyan"]
