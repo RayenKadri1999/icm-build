@@ -34,7 +34,7 @@ RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.s
     bash miniconda.sh -b -p /opt/conda && \
     rm miniconda.sh && \
     /opt/conda/bin/conda clean -ya && \
-    /opt/conda/bin/conda create -y -n ojcas_verify python=3.8
+    /opt/conda/bin/conda create -y -n ojcas_verify python=3.8 -c conda-forge
 
 # Make python3.8 default 'python' (system-wide, for compatibility)
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 \
