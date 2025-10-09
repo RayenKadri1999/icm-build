@@ -1,6 +1,5 @@
 # Dockerfile — Kubeflow-compatible Jupyter image with a Python 3.8.20 kernel
-FROM ghcr.io/kubeflow/kubeflow/notebook-servers/jupyter-scipy:v1.10.0
-
+FROM kubeflownotebookswg/jupyter-scipy:v1.8.0
 USER root
 
 # Install build deps for compiling Python
