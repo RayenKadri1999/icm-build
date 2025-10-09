@@ -93,4 +93,5 @@ ENV PYTHONPATH=${WORKSPACE}/repo:$PYTHONPATH
 # Final: small health-check and entry
 RUN python -c "import torch, sys; print('torch', torch.__version__, 'cuda_available', torch.cuda.is_available())" || true
 
-ENTRYPOINT ["/bin/bash"]
+overridden)
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''", "--NotebookApp.allow_origin='*'", "--NotebookApp.base_url=${NB_PREFIX}", "--NotebookApp.allow_remote_access=True", "--notebook-dir=/home/jovyan"
