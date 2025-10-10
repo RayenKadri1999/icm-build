@@ -1,7 +1,9 @@
 FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
 
+# Non-interactive apt
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install system dependencies including g++
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
@@ -22,7 +24,7 @@ RUN apt-get update && apt-get install -y \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-# Set default timezone to UTC (avoid tzdata prompts)
+# Set timezone to UTC to avoid tzdata prompts
 RUN ln -fs /usr/share/zoneinfo/UTC /etc/localtime && dpkg-reconfigure --frontend noninteractive tzdata
 
 # Install Python 3.8.20 from source
@@ -35,18 +37,17 @@ RUN cd /tmp && \
     make altinstall && \
     cd / && rm -rf /tmp/Python-3.8.20 /tmp/Python-3.8.20.tgz
 
-RUN python3.8 --version
-
-# Install pip
-RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && \
-    python3.8 get-pip.py && rm get-pip.py
+# Ensure pip is installed and upgraded
+RUN python3.8 -m ensurepip --upgrade && python3.8 -m pip install --upgrade pip
 
 # Install PyTorch 1.11.0 with CUDA 11.3
-RUN pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
+RUN python3.8 -m pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
 
 # Install code-server (VS Code in browser)
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
+# Expose the port for code-server
 EXPOSE 8080
 
+# Start code-server
 CMD ["code-server", "--bind-addr", "0.0.0.0:8080", "--auth", "none"]
