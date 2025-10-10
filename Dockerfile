@@ -47,7 +47,7 @@ RUN python3.8 -m pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torch
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
 # Expose the port for code-server
-EXPOSE 8080
+EXPOSE 8888
 
 # Start code-server
-CMD ["code-server", "--bind-addr", "0.0.0.0:8080", "--auth", "none"]
+CMD ["code-server", "--bind-addr", "0.0.0.0:8888", "--auth", "none"]
